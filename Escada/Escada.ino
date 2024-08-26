@@ -7,7 +7,20 @@
 #define BRIGHTNESS_HIGH 128     // Brilho alto (50%)
 #define LED_TYPE WS2812B        // Tipo de LED
 #define COLOR_ORDER GRB         // Ordem de cor dos LEDs
-const int ledPins[NUM_STRIPS] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}; // Pinos dos LEDs
+
+// Pinos dos LEDs
+const int LED_PIN_1 = 2;
+const int LED_PIN_2 = 3;
+const int LED_PIN_3 = 4;
+const int LED_PIN_4 = 5;
+const int LED_PIN_5 = 6;
+const int LED_PIN_6 = 7;
+const int LED_PIN_7 = 8;
+const int LED_PIN_8 = 9;
+const int LED_PIN_9 = 10;
+const int LED_PIN_10 = 11;
+const int LED_PIN_11 = 12;
+const int LED_PIN_12 = 13;
 
 // Configurações dos sensores PIR
 #define NUM_SENSORS 15
@@ -44,11 +57,23 @@ unsigned long lastSensorCheck = 0;
 
 void setup() {
   Serial.begin(115200);  // Comunicação com o PC
-  
+
   // Inicializa LEDs
+  FastLED.addLeds<LED_TYPE, LED_PIN_1, COLOR_ORDER>(leds[0], NUM_LEDS_PER_STRIP); // Configura a fita 1
+  FastLED.addLeds<LED_TYPE, LED_PIN_2, COLOR_ORDER>(leds[1], NUM_LEDS_PER_STRIP); // Configura a fita 2
+  FastLED.addLeds<LED_TYPE, LED_PIN_3, COLOR_ORDER>(leds[2], NUM_LEDS_PER_STRIP); // Configura a fita 3
+  FastLED.addLeds<LED_TYPE, LED_PIN_4, COLOR_ORDER>(leds[3], NUM_LEDS_PER_STRIP); // Configura a fita 4
+  FastLED.addLeds<LED_TYPE, LED_PIN_5, COLOR_ORDER>(leds[4], NUM_LEDS_PER_STRIP); // Configura a fita 5
+  FastLED.addLeds<LED_TYPE, LED_PIN_6, COLOR_ORDER>(leds[5], NUM_LEDS_PER_STRIP); // Configura a fita 6
+  FastLED.addLeds<LED_TYPE, LED_PIN_7, COLOR_ORDER>(leds[6], NUM_LEDS_PER_STRIP); // Configura a fita 7
+  FastLED.addLeds<LED_TYPE, LED_PIN_8, COLOR_ORDER>(leds[7], NUM_LEDS_PER_STRIP); // Configura a fita 8
+  FastLED.addLeds<LED_TYPE, LED_PIN_9, COLOR_ORDER>(leds[8], NUM_LEDS_PER_STRIP); // Configura a fita 9
+  FastLED.addLeds<LED_TYPE, LED_PIN_10, COLOR_ORDER>(leds[9], NUM_LEDS_PER_STRIP); // Configura a fita 10
+  FastLED.addLeds<LED_TYPE, LED_PIN_11, COLOR_ORDER>(leds[10], NUM_LEDS_PER_STRIP); // Configura a fita 11
+  FastLED.addLeds<LED_TYPE, LED_PIN_12, COLOR_ORDER>(leds[11], NUM_LEDS_PER_STRIP); // Configura a fita 12
+
+  FastLED.setBrightness(BRIGHTNESS_LOW);
   for (int i = 0; i < NUM_STRIPS; i++) {
-    FastLED.addLeds<LED_TYPE, ledPins[i], COLOR_ORDER>(leds[i], NUM_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
-    FastLED.setBrightness(BRIGHTNESS_LOW);
     for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
       leds[i][j] = CRGB::Black;  // Inicia todos apagados
     }
@@ -67,47 +92,27 @@ void setup() {
 }
 
 void loop() {
-  unsigned long now = millis();
-
-  // Checa sensores e atualiza LEDs
-  if (now - lastSensorCheck >= 50) {  // Checa sensores a cada 50 ms
-    checarSensores();
-    lastSensorCheck = now;
-  }
-
-  // Atualiza o brilho gradualmente
-  if (now - lastUpdate >= 20) {  // Atualiza LEDs a cada 20 ms
-    for (int i = 0; i < NUM_STRIPS; i++) {
-      if (currentBrightness[i] < BRIGHTNESS_HIGH && isLEDActive(i)) {
-        currentBrightness[i] += (BRIGHTNESS_HIGH - BRIGHTNESS_LOW) * 20 / FADE_DURATION;
-        if (currentBrightness[i] > BRIGHTNESS_HIGH) currentBrightness[i] = BRIGHTNESS_HIGH;
-        FastLED.setBrightness(currentBrightness[i]);
-        FastLED.show();
-      }
-    }
-    lastUpdate = now;
-  }
+  checarSensores();
+  // Código adicional para controle dos LEDs e sensores
 }
 
 void checarSensores() {
-  bool sensorTriggered = false;
-
-  // Lê o estado de todos os sensores
+  unsigned long currentTime = millis();
+  
   for (int i = 0; i < NUM_SENSORS; i++) {
-    bool currentState = digitalRead(sensorPins[i]) == HIGH;
-    if (currentState != sensorStates[i]) {
-      sensorStates[i] = currentState;
-      if (currentState) {
-        sensorLastTriggered[i] = millis();
-        atualizarLEDs(sensorToLEDMapping[i]);
+    if (digitalRead(sensorPins[i]) == HIGH) {
+      sensorStates[i] = true;
+      sensorLastTriggered[i] = currentTime;
+    } else {
+      if (currentTime - sensorLastTriggered[i] > DETECTION_DELAY) {
+        sensorStates[i] = false;
       }
     }
   }
   
-  // Se nenhum sensor estiver acionado, manter brilho mínimo
-  if (!algumSensorAtivo()) {
-    for (int i = 0; i < NUM_STRIPS; i++) {
-      currentBrightness[i] = BRIGHTNESS_LOW;
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    if (isLEDActive(i)) {
+      atualizarLEDs(i);
     }
   }
 }
@@ -131,23 +136,18 @@ bool isLEDActive(int stripIndex) {
 }
 
 void atualizarLEDs(int ledStripIndex) {
-  // Apaga todos os LEDs para reiniciar a sequência
-  for (int i = 0; i < NUM_STRIPS; i++) {
-    for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
-      leds[i][j] = CRGB::Black;
-    }
-    currentBrightness[i] = BRIGHTNESS_LOW;  // Reseta o brilho para todos os LEDs
+  // Apaga todos os LEDs da fita
+  for (int i = 0; i < NUM_LEDS_PER_STRIP; i++) {
+    leds[ledStripIndex][i] = CRGB::Black;
   }
 
-  // Ilumina o degrau atual e 2 antes/2 depois
-  int startDegrau = max(ledStripIndex - 2, 0);
-  int endDegrau = min(ledStripIndex + 2, NUM_STRIPS - 1);
-
-  for (int i = startDegrau; i <= endDegrau; i++) {
-    for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
-      leds[i][j] = CRGB::White;
-    }
-    currentBrightness[i] = BRIGHTNESS_HIGH; // Brilho máximo durante o movimento
+  // Acende os LEDs da fita com efeito de fade
+  for (int i = 0; i < NUM_LEDS_PER_STRIP; i++) {
+    leds[ledStripIndex][i] = CRGB::White; // Pode ser substituído por qualquer cor desejada
   }
+
+  // Configura o brilho da fita
+  FastLED.setBrightness(currentBrightness[ledStripIndex]);
   FastLED.show();
 }
+
