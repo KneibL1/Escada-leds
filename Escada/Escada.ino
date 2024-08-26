@@ -1,22 +1,25 @@
 #include <FastLED.h>
 
 // Configurações das fitas LED
-#define NUM_LEDS_PER_STRIP 10 // Número de LEDs por fita (ajuste conforme necessário)
-#define NUM_STRIPS 12         // Número de fitas (12 degraus)
-#define BRIGHTNESS_LOW 3      // Brilho baixo (1%)
-#define BRIGHTNESS_HIGH 128   // Brilho alto (50%)
-#define LED_TYPE WS2812B      // Tipo de LED
-#define COLOR_ORDER GRB       // Ordem de cor dos LEDs
+#define NUM_LEDS_PER_STRIP 10   // Número de LEDs por fita (ajuste conforme necessário)
+#define NUM_STRIPS 12           // Número de fitas (12 degraus)
+#define BRIGHTNESS_LOW 3        // Brilho baixo (1%)
+#define BRIGHTNESS_HIGH 128     // Brilho alto (50%)
+#define LED_TYPE WS2812B        // Tipo de LED
+#define COLOR_ORDER GRB         // Ordem de cor dos LEDs
 const int ledPins[NUM_STRIPS] = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}; // Pinos dos LEDs
 
 // Configurações dos sensores PIR
 #define NUM_SENSORS 15
-#define SENSOR_PIN_START 22   // Pin inicial dos sensores PIR
-#define DETECTION_DELAY 100   // Atraso em milissegundos entre as luzes ascendendo
-#define KEEP_LIGHTS_ON 5      // Quantidade de degraus iluminados simultaneamente
+#define SENSOR_PIN_START 22     // Pino inicial dos sensores PIR
+#define DETECTION_DELAY 100     // Atraso em milissegundos entre as luzes ascendendo
+#define KEEP_LIGHTS_ON 5        // Quantidade de degraus iluminados simultaneamente
+#define FADE_DURATION 500       // Duração de fade em milissegundos
 
 CRGB leds[NUM_STRIPS][NUM_LEDS_PER_STRIP];
 int sensorPins[NUM_SENSORS];
+bool sensorStates[NUM_SENSORS];
+unsigned long sensorLastTriggered[NUM_SENSORS];
 
 // Vinculações entre sensores e fitas de LED
 int sensorToLEDMapping[NUM_SENSORS] = {
@@ -34,7 +37,14 @@ int sensorToLEDMapping[NUM_SENSORS] = {
   11     // Sensor 15 -> Fita 12 (Degrau 12)
 };
 
+// Variáveis de controle
+int currentBrightness[NUM_STRIPS];
+unsigned long lastUpdate = 0;
+unsigned long lastSensorCheck = 0;
+
 void setup() {
+  Serial.begin(115200);  // Comunicação com o PC
+  
   // Inicializa LEDs
   for (int i = 0; i < NUM_STRIPS; i++) {
     FastLED.addLeds<LED_TYPE, ledPins[i], COLOR_ORDER>(leds[i], NUM_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
@@ -42,33 +52,91 @@ void setup() {
     for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
       leds[i][j] = CRGB::Black;  // Inicia todos apagados
     }
+    currentBrightness[i] = BRIGHTNESS_LOW;
   }
   
   // Inicializa sensores PIR
   for (int i = 0; i < NUM_SENSORS; i++) {
     sensorPins[i] = SENSOR_PIN_START + i;
     pinMode(sensorPins[i], INPUT);
+    sensorStates[i] = false;
+    sensorLastTriggered[i] = 0;
   }
   
   FastLED.show();
 }
 
 void loop() {
+  unsigned long now = millis();
+
+  // Checa sensores e atualiza LEDs
+  if (now - lastSensorCheck >= 50) {  // Checa sensores a cada 50 ms
+    checarSensores();
+    lastSensorCheck = now;
+  }
+
+  // Atualiza o brilho gradualmente
+  if (now - lastUpdate >= 20) {  // Atualiza LEDs a cada 20 ms
+    for (int i = 0; i < NUM_STRIPS; i++) {
+      if (currentBrightness[i] < BRIGHTNESS_HIGH && isLEDActive(i)) {
+        currentBrightness[i] += (BRIGHTNESS_HIGH - BRIGHTNESS_LOW) * 20 / FADE_DURATION;
+        if (currentBrightness[i] > BRIGHTNESS_HIGH) currentBrightness[i] = BRIGHTNESS_HIGH;
+        FastLED.setBrightness(currentBrightness[i]);
+        FastLED.show();
+      }
+    }
+    lastUpdate = now;
+  }
+}
+
+void checarSensores() {
+  bool sensorTriggered = false;
+
+  // Lê o estado de todos os sensores
   for (int i = 0; i < NUM_SENSORS; i++) {
-    if (digitalRead(sensorPins[i]) == HIGH) {
-      // Movimento detectado no sensor i
-      int ledStripIndex = sensorToLEDMapping[i];
-      iluminarDegraus(ledStripIndex);
+    bool currentState = digitalRead(sensorPins[i]) == HIGH;
+    if (currentState != sensorStates[i]) {
+      sensorStates[i] = currentState;
+      if (currentState) {
+        sensorLastTriggered[i] = millis();
+        atualizarLEDs(sensorToLEDMapping[i]);
+      }
+    }
+  }
+  
+  // Se nenhum sensor estiver acionado, manter brilho mínimo
+  if (!algumSensorAtivo()) {
+    for (int i = 0; i < NUM_STRIPS; i++) {
+      currentBrightness[i] = BRIGHTNESS_LOW;
     }
   }
 }
 
-void iluminarDegraus(int ledStripIndex) {
+bool algumSensorAtivo() {
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    if (sensorStates[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isLEDActive(int stripIndex) {
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    if (sensorToLEDMapping[i] == stripIndex && sensorStates[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void atualizarLEDs(int ledStripIndex) {
   // Apaga todos os LEDs para reiniciar a sequência
   for (int i = 0; i < NUM_STRIPS; i++) {
     for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
       leds[i][j] = CRGB::Black;
     }
+    currentBrightness[i] = BRIGHTNESS_LOW;  // Reseta o brilho para todos os LEDs
   }
 
   // Ilumina o degrau atual e 2 antes/2 depois
@@ -78,9 +146,8 @@ void iluminarDegraus(int ledStripIndex) {
   for (int i = startDegrau; i <= endDegrau; i++) {
     for (int j = 0; j < NUM_LEDS_PER_STRIP; j++) {
       leds[i][j] = CRGB::White;
-      FastLED.setBrightness(i == ledStripIndex ? BRIGHTNESS_HIGH : BRIGHTNESS_LOW);
     }
-    FastLED.show();
-    delay(DETECTION_DELAY);  // Atraso para criar o efeito de sequência
+    currentBrightness[i] = BRIGHTNESS_HIGH; // Brilho máximo durante o movimento
   }
+  FastLED.show();
 }
